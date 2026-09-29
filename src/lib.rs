@@ -1,14 +1,14 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! DarkPlaces rcon protocol.
+//!
+//! The crate is sans-IO: [`packet`] builds outgoing packets, [`parse`]
+//! parses incoming ones, and [`core::Session`] drives a client without
+//! touching sockets or clocks.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#![warn(missing_docs)]
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod core;
+pub mod error;
+pub mod packet;
+pub mod parse;
+
+pub use error::{Error, Result};

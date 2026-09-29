@@ -2,6 +2,8 @@
 name = "xrcon"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.97"
 
 [dependencies]
+hmac = "0.13.0"
+md4 = "0.11.0"
