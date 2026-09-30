@@ -1,0 +1,11 @@
+[package]
+name = "xrcon-xonotic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "xonotic"
+
+[dependencies]
+darkplaces = { package = "xrcon-darkplaces", path = "../darkplaces" }
