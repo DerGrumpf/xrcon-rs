@@ -5,5 +5,15 @@ edition = "2024"
 rust-version = "1.97"
 
 [dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+configparser = "3.3.0"
 hmac = "0.13.0"
 md4 = "0.11.0"
+rpassword = "7.5.4"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

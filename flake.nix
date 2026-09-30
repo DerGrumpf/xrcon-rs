@@ -13,17 +13,11 @@
         "aarch64-darwin"
       ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      manifest = (nixpkgs.lib.importTOML ./Cargo.toml).package;
     in
     {
       packages = forAll (pkgs: rec {
         default = xrcon;
-        xrcon = pkgs.rustPlatform.buildRustPackage {
-          inherit (manifest) version;
-          pname = manifest.name;
-          src = pkgs.lib.cleanSource ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-        };
+        xrcon = pkgs.callPackage ./nix/package.nix { };
       });
 
       checks = forAll (pkgs: {
