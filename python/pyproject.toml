@@ -1,0 +1,10 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "xrcon"
+dynamic = ["version"]
+
+[tool.maturin]
+module-name = "xrcon._xrcon"

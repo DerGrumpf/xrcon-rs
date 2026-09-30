@@ -6,6 +6,7 @@
 
 #![warn(missing_docs)]
 
+pub mod color;
 pub mod core;
 pub mod error;
 pub mod packet;

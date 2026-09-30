@@ -7,6 +7,8 @@ pkgs.mkShell {
     rustfmt
     clippy
     rust-analyzer
+    maturin
+    python3
   ];
 
   RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";

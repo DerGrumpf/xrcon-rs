@@ -10,10 +10,9 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use configparser::ini::Ini;
 
+use xrcon::color;
 use xrcon::core::{Event, Mode, Session};
 use xrcon::parse::parse_server_addr;
-
-mod color;
 
 const DEFAULT_PORT: u16 = 26000;
 const DEFAULT_TIMEOUT: f64 = 0.7;

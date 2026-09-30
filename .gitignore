@@ -2,5 +2,11 @@
 /result
 /result-*
 
-# Added by cargo
+# Rust
 /target
+
+# Python
+# Python
+__pycache__/
+*.pyc
+*.so
