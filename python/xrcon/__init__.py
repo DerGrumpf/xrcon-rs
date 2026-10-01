@@ -1,4 +1,3 @@
-from ._types import Player
 from ._xrcon import (
     AsyncClient,
     Client,
@@ -11,11 +10,5 @@ from ._xrcon import (
     parse_server_addr,
     parse_server_vars,
     parse_servers_response,
+    parse_status_packet,
 )
-from ._xrcon import parse_status_packet as _parse_status_packet
-
-
-def parse_status_packet(packet):
-    """Returns (vars, players) with players as Player tuples."""
-    vars, players = _parse_status_packet(packet)
-    return vars, [Player(*p) for p in players]

@@ -32,12 +32,15 @@ fn vars_dict<'py>(
 }
 
 fn players_list<'py>(py: Python<'py>, players: &[Player]) -> PyResult<Bound<'py, PyList>> {
-    PyList::new(
-        py,
-        players
-            .iter()
-            .map(|p| (p.frags, p.ping, PyBytes::new(py, &p.name))),
-    )
+    let player_type = py
+        .import("collections")?
+        .getattr("namedtuple")?
+        .call1(("Player", ["frags", "ping", "name"]))?;
+    let list = PyList::empty(py);
+    for p in players {
+        list.append(player_type.call1((p.frags, p.ping, PyBytes::new(py, &p.name)))?)?;
+    }
+    Ok(list)
 }
 
 fn mode_from(value: u8) -> PyResult<Mode> {
@@ -245,16 +248,22 @@ impl PyClient {
         Ok(Self { inner })
     }
 
-    #[pyo3(signature = (command, timeout = 0.7))]
+    #[pyo3(signature = (command, timeout = 0.7, color = false))]
     fn execute<'py>(
         &mut self,
         py: Python<'py>,
         command: &[u8],
         timeout: f64,
+        color: bool,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let out = py
             .detach(|| self.inner.execute(command, timeout))
             .map_err(net_err)?;
+        let out = if color {
+            xrcon::color::colorize(&out)
+        } else {
+            out
+        };
         Ok(PyBytes::new(py, &out))
     }
 
@@ -309,6 +318,35 @@ impl PyAsyncClient {
         })
     }
 
+    fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.borrow(py).inner.clone();
+        let (host, port, pw, mode) = {
+            let s = slf.borrow(py);
+            (s.host.clone(), s.port, s.password.clone(), s.mode)
+        };
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let c = TokioClient::connect(&host, port, pw, mode)
+                .await
+                .map_err(tokio_err)?;
+            *inner.lock().await = Some(c);
+            Ok(slf)
+        })
+    }
+
+    fn __aexit__<'py>(
+        &self,
+        py: Python<'py>,
+        _exc_type: Option<Bound<'py, PyAny>>,
+        _exc: Option<Bound<'py, PyAny>>,
+        _tb: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            *inner.lock().await = None;
+            Ok(())
+        })
+    }
+
     fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let (host, port, pw, mode) = (
             self.host.clone(),
@@ -334,12 +372,13 @@ impl PyAsyncClient {
         })
     }
 
-    #[pyo3(signature = (command, timeout = 0.7))]
+    #[pyo3(signature = (command, timeout = 0.7, color = false))]
     fn execute<'py>(
         &self,
         py: Python<'py>,
         command: &[u8],
         timeout: f64,
+        color: bool,
     ) -> PyResult<Bound<'py, PyAny>> {
         let (inner, command) = (self.inner.clone(), command.to_vec());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -348,6 +387,11 @@ impl PyAsyncClient {
                 .as_mut()
                 .ok_or_else(|| PyValueError::new_err("not connected"))?;
             let out = c.execute(&command, timeout).await.map_err(tokio_err)?;
+            let out = if color {
+                xrcon::color::colorize(&out)
+            } else {
+                out
+            };
             Ok(Cow::<'static, [u8]>::Owned(out))
         })
     }
