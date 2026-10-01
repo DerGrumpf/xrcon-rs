@@ -6,7 +6,13 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use xrcon::core::{Event, Mode, PingKind, Session};
+use xrcon::net::Client as NetClient;
 use xrcon::parse::{self, Player};
+
+use std::borrow::Cow;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use xrcon_tokio::Client as TokioClient;
 
 create_exception!(xrcon._xrcon, ParseError, PyValueError);
 
@@ -220,6 +226,173 @@ fn py_parse_servers_response(packet: &[u8]) -> PyResult<Vec<(String, u16)>> {
         .collect())
 }
 
+fn net_err(e: xrcon::net::Error) -> PyErr {
+    pyo3::exceptions::PyOSError::new_err(e.to_string())
+}
+
+/// Blocking rcon client.
+#[pyclass(name = "Client")]
+struct PyClient {
+    inner: NetClient,
+}
+
+#[pymethods]
+impl PyClient {
+    #[new]
+    #[pyo3(signature = (host, password, mode = 1, port = 26000))]
+    fn new(host: &str, password: &[u8], mode: u8, port: u16) -> PyResult<Self> {
+        let inner = NetClient::connect(host, port, password, mode_from(mode)?).map_err(net_err)?;
+        Ok(Self { inner })
+    }
+
+    #[pyo3(signature = (command, timeout = 0.7))]
+    fn execute<'py>(
+        &mut self,
+        py: Python<'py>,
+        command: &[u8],
+        timeout: f64,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let out = py
+            .detach(|| self.inner.execute(command, timeout))
+            .map_err(net_err)?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    #[pyo3(signature = (kind = "q2", timeout = 1.0))]
+    fn ping(&mut self, py: Python<'_>, kind: &str, timeout: f64) -> PyResult<Option<f64>> {
+        let kind = kind_from(kind)?;
+        py.detach(|| self.inner.ping(kind, timeout))
+            .map_err(net_err)
+    }
+
+    #[pyo3(signature = (timeout = 1.0))]
+    fn getstatus<'py>(
+        &mut self,
+        py: Python<'py>,
+        timeout: f64,
+    ) -> PyResult<Option<(Bound<'py, PyDict>, Bound<'py, PyList>)>> {
+        match py
+            .detach(|| self.inner.getstatus(timeout))
+            .map_err(net_err)?
+        {
+            Some((vars, players)) => Ok(Some((vars_dict(py, &vars)?, players_list(py, &players)?))),
+            None => Ok(None),
+        }
+    }
+}
+
+fn tokio_err(e: xrcon_tokio::Error) -> PyErr {
+    pyo3::exceptions::PyOSError::new_err(e.to_string())
+}
+
+/// Async rcon client (Tokio).
+#[pyclass(name = "AsyncClient")]
+struct PyAsyncClient {
+    host: String,
+    port: u16,
+    password: Vec<u8>,
+    mode: Mode,
+    inner: Arc<Mutex<Option<TokioClient>>>,
+}
+
+#[pymethods]
+impl PyAsyncClient {
+    #[new]
+    #[pyo3(signature = (host, password, mode = 1, port = 26000))]
+    fn new(host: String, password: &[u8], mode: u8, port: u16) -> PyResult<Self> {
+        Ok(Self {
+            host,
+            port,
+            password: password.to_vec(),
+            mode: mode_from(mode)?,
+            inner: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let (host, port, pw, mode) = (
+            self.host.clone(),
+            self.port,
+            self.password.clone(),
+            self.mode,
+        );
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let c = TokioClient::connect(&host, port, pw, mode)
+                .await
+                .map_err(tokio_err)?;
+            *inner.lock().await = Some(c);
+            Ok(())
+        })
+    }
+
+    fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            *inner.lock().await = None;
+            Ok(())
+        })
+    }
+
+    #[pyo3(signature = (command, timeout = 0.7))]
+    fn execute<'py>(
+        &self,
+        py: Python<'py>,
+        command: &[u8],
+        timeout: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let (inner, command) = (self.inner.clone(), command.to_vec());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut g = inner.lock().await;
+            let c = g
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("not connected"))?;
+            let out = c.execute(&command, timeout).await.map_err(tokio_err)?;
+            Ok(Cow::<'static, [u8]>::Owned(out))
+        })
+    }
+
+    #[pyo3(signature = (kind = "q2", timeout = 1.0))]
+    fn ping<'py>(&self, py: Python<'py>, kind: &str, timeout: f64) -> PyResult<Bound<'py, PyAny>> {
+        let (inner, kind) = (self.inner.clone(), kind_from(kind)?);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut g = inner.lock().await;
+            let c = g
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("not connected"))?;
+            c.ping(kind, timeout).await.map_err(tokio_err)
+        })
+    }
+
+    #[pyo3(signature = (timeout = 1.0))]
+    fn getstatus<'py>(&self, py: Python<'py>, timeout: f64) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut g = inner.lock().await;
+            let c = g
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("not connected"))?;
+            let status = c.getstatus(timeout).await.map_err(tokio_err)?;
+            Python::attach(|py| -> PyResult<Option<Py<PyAny>>> {
+                match status {
+                    Some((vars, players)) => Ok(Some(
+                        PyTuple::new(
+                            py,
+                            [
+                                vars_dict(py, &vars)?.into_any(),
+                                players_list(py, &players)?.into_any(),
+                            ],
+                        )?
+                        .into_any()
+                        .unbind(),
+                    )),
+                    None => Ok(None),
+                }
+            })
+        })
+    }
+}
+
 #[pymodule]
 fn _xrcon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -232,5 +405,7 @@ fn _xrcon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_parse_server_vars, m)?)?;
     m.add_function(wrap_pyfunction!(py_parse_status_packet, m)?)?;
     m.add_function(wrap_pyfunction!(py_parse_servers_response, m)?)?;
+    m.add_class::<PyClient>()?;
+    m.add_class::<PyAsyncClient>()?;
     Ok(())
 }

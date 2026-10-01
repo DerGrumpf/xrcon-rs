@@ -4,9 +4,10 @@
 
 # Rust
 /target
+/tokio/examples/
 
 # Python
-# Python
+main.py
 __pycache__/
 *.pyc
 *.so

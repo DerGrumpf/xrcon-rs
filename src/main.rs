@@ -2,16 +2,15 @@
 
 use std::io::IsTerminal;
 use std::io::{self, Write};
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use configparser::ini::Ini;
 
 use xrcon::color;
-use xrcon::core::{Event, Mode, Session};
+use xrcon::core::Mode;
+use xrcon::net::Client;
 use xrcon::parse::parse_server_addr;
 
 const DEFAULT_PORT: u16 = 26000;
@@ -49,14 +48,6 @@ fn fail(message: String) -> ! {
     Cli::command().error(ErrorKind::Io, message).exit()
 }
 
-/// Current Unix time in seconds.
-fn now() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
-}
-
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -82,17 +73,6 @@ fn load_config(path: Option<&PathBuf>) -> Result<Ini, String> {
         }
     }
     Ok(ini)
-}
-
-/// Resolves a host, preferring an IPv4 result, else the first one.
-fn resolve(host: &str, port: u16) -> io::Result<SocketAddr> {
-    let addrs: Vec<SocketAddr> = (host, port).to_socket_addrs()?.collect();
-    addrs
-        .iter()
-        .find(|a| a.is_ipv4())
-        .or(addrs.first())
-        .copied()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no address found"))
 }
 
 fn run(cli: &Cli) -> Result<(), String> {
@@ -154,73 +134,15 @@ fn run(cli: &Cli) -> Result<(), String> {
 
     let (host, port) = parse_server_addr(&server, DEFAULT_PORT)
         .map_err(|e| format!("bad server address '{server}': {e}"))?;
-    let addr = resolve(&host, port).map_err(|e| format!("can't resolve '{host}': {e}"))?;
-    let bind: SocketAddr = if addr.is_ipv4() {
-        ([0u8; 4], 0).into()
-    } else {
-        ([0u16; 8], 0).into()
-    };
-    let socket = UdpSocket::bind(bind).map_err(|e| e.to_string())?;
-    socket.connect(addr).map_err(|e| e.to_string())?;
-
-    let mut session = Session::new(password.into_bytes(), mode);
+    let mut client = Client::connect(&host, port, password.into_bytes(), mode)
+        .map_err(|e| format!("can't connect to '{host}': {e}"))?;
     if mode == Mode::Challenge {
-        session.set_challenge_timeout(timeout);
-        session.set_challenge_retries(1);
+        client.session_mut().set_challenge_timeout(timeout);
+        client.session_mut().set_challenge_retries(1);
     }
-    session.send(cli.command.join(" ").as_bytes(), now());
-
-    let mut out: Vec<u8> = Vec::new();
-    let mut buf = vec![0u8; 65535];
-    let mut read_until: Option<f64> = None;
-    loop {
-        while let Some(packet) = session.poll_transmit() {
-            socket.send(&packet).map_err(|e| e.to_string())?;
-        }
-        while let Some(event) = session.poll_event() {
-            match event {
-                Event::Response(body) => out.extend_from_slice(&body),
-                Event::ChallengeFailed => {
-                    return Err("no challenge reply from server".to_string());
-                }
-                _ => {}
-            }
-        }
-        let t = now();
-        let deadline = match session.poll_timeout() {
-            Some(d) => d,
-            None => {
-                let r = *read_until.get_or_insert(t + timeout);
-                if t >= r {
-                    break;
-                }
-                r
-            }
-        };
-        let wait = deadline - t;
-        if wait <= 0.0 {
-            session.handle_timeout(t);
-            continue;
-        }
-        let dur = Duration::try_from_secs_f64(wait.max(0.001)).map_err(|e| e.to_string())?;
-        socket
-            .set_read_timeout(Some(dur))
-            .map_err(|e| e.to_string())?;
-        match socket.recv(&mut buf) {
-            Ok(n) => session.handle_datagram(buf.get(..n).unwrap_or(&[]), now()),
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) =>
-            {
-                session.handle_timeout(now());
-            }
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-
+    let out = client
+        .execute(cli.command.join(" ").as_bytes(), timeout)
+        .map_err(|e| e.to_string())?;
     let mut stdout = io::stdout();
     let data = if stdout.is_terminal() {
         color::colorize(&out)
