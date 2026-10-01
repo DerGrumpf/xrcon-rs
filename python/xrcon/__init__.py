@@ -12,6 +12,7 @@ from ._xrcon import (
 )
 from ._xrcon import parse_status_packet as _parse_status_packet
 from .aio import AsyncClient, ChallengeFailed
+from .sync import Client
 
 
 def parse_status_packet(packet):
