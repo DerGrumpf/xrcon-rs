@@ -393,23 +393,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "xrcon-darkplaces"
-version = "0.1.0"
-dependencies = [
- "xrcon",
-]
-
-[[package]]
 name = "xrcon-python"
 version = "0.1.0"
 dependencies = [
  "pyo3",
  "xrcon",
-]
-
-[[package]]
-name = "xrcon-xonotic"
-version = "0.1.0"
-dependencies = [
- "xrcon-darkplaces",
 ]
