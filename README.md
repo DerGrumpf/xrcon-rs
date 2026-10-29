@@ -1,7 +1,3 @@
-<!-- TODO: the Rust dependency line in "Rust library > Async client" uses
-`version = "0.1"`. The crate is not published, so replace it with a git
-dependency (`git = "<repo url>"`) or publish the crate first. -->
-
 # xrcon
 
 rcon client for Xonotic (DarkPlaces rcon protocol): a command line tool, a
@@ -100,7 +96,7 @@ fn main() {
 Enable the `tokio` feature in your `Cargo.toml`:
 
 ```toml
-xrcon = { version = "0.1", features = ["tokio"] }
+xrcon = { version = "1.0", features = ["tokio"] }
 ```
 
 ```rust
@@ -221,6 +217,12 @@ XRCON_HOST=example.com XRCON_PORT=26000 XRCON_PASSWORD='secret' XRCON_MODE=1 \
 ```
 
 ### Python
+
+Install it via pip
+
+```
+pip install xrcon-rs
+```
 
 Build the module first (see "Python module"), then run:
 
