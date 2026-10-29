@@ -3,8 +3,12 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "xrcon"
+name = "xrcon-rs"
 dynamic = ["version"]
+license = "GPL-3.0-or-later"
+description = "rcon client for Xonotic (DarkPlaces rcon protocol), Rust implementation with Python bindings"
+readme = "../README.md"
+requires-python = ">=3.9"
 
 [tool.maturin]
 module-name = "xrcon._xrcon"
