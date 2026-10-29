@@ -133,10 +133,4 @@ impl Harness {
         self.session.ping(kind, timeout, self.now);
         self.drain();
     }
-
-    /// Starts a status query at the current time.
-    pub fn getstatus(&mut self, timeout: f64) {
-        self.session.getstatus(timeout, self.now);
-        self.drain();
-    }
 }

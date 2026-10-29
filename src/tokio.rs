@@ -1,17 +1,14 @@
 //! Tokio client for the DarkPlaces rcon protocol, driving `xrcon::core::Session`.
 
-#![warn(missing_docs)]
-
 use std::collections::VecDeque;
 use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::core::{Event, Mode, PingKind, Session};
 use tokio::net::{UdpSocket, lookup_host};
 use tokio::time::timeout as tokio_timeout;
-use xrcon::core::{Event, Mode, PingKind, Session};
-use xrcon::parse::Player;
 
-pub use xrcon::core::{Event as SessionEvent, Mode as RconMode};
+pub use crate::core::{Event as SessionEvent, Mode as RconMode};
 
 /// Errors of the Tokio client.
 #[derive(Debug)]
@@ -20,8 +17,6 @@ pub enum Error {
     Io(io::Error),
     /// The server never answered the challenge request.
     ChallengeFailed,
-    /// The status reply could not be parsed.
-    StatusInvalid,
     /// The host did not resolve.
     NoAddress,
 }
@@ -31,7 +26,6 @@ impl std::fmt::Display for Error {
         match self {
             Error::Io(e) => write!(f, "io error: {e}"),
             Error::ChallengeFailed => f.write_str("no challenge reply from server"),
-            Error::StatusInvalid => f.write_str("invalid status reply"),
             Error::NoAddress => f.write_str("host did not resolve"),
         }
     }
@@ -44,9 +38,6 @@ impl From<io::Error> for Error {
         Error::Io(e)
     }
 }
-
-/// Result of a status query.
-pub type Status = (std::collections::HashMap<Vec<u8>, Vec<u8>>, Vec<Player>);
 
 fn now() -> f64 {
     SystemTime::now()
@@ -179,21 +170,6 @@ impl Client {
             match self.next_event().await? {
                 Event::Pong { rtt, .. } => return Ok(Some(rtt)),
                 Event::PingTimeout(_) => return Ok(None),
-                _ => {}
-            }
-        }
-    }
-
-    /// Queries the server status. Returns `None` on timeout.
-    pub async fn getstatus(&mut self, timeout: f64) -> Result<Option<Status>, Error> {
-        self.events.clear();
-        self.session.getstatus(timeout, now());
-        self.pump().await?;
-        loop {
-            match self.next_event().await? {
-                Event::Status { vars, players } => return Ok(Some((vars, players))),
-                Event::StatusTimeout => return Ok(None),
-                Event::StatusInvalid => return Err(Error::StatusInvalid),
                 _ => {}
             }
         }

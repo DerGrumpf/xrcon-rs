@@ -1,4 +1,4 @@
-//! Tests for pings and status queries on the client core
+//! Tests for pings queries on the client core
 //! (`xrcon::core::Session`), driven through the `Harness` in
 //! `tests/common/mod.rs`.
 //!
@@ -6,47 +6,28 @@
 //!
 //! - `Session::ping(&mut self, kind: PingKind, timeout: f64, now: f64)`: send
 //!   a ping and wait for the matching pong for `timeout` seconds.
-//! - `Session::getstatus(&mut self, timeout: f64, now: f64)`: send a status
-//!   request and wait for the reply for `timeout` seconds.
 //! - `PingKind`: `Q2` (ping with header, answer `ack`) and `Q3` (ping without
 //!   header, answer `disconnect`).
 //! - New `Event` variants:
 //!   - `Event::Pong { kind: PingKind, rtt: f64 }`: the pong arrived after
 //!     `rtt` seconds.
 //!   - `Event::PingTimeout(PingKind)`: no matching pong within the timeout.
-//!   - `Event::Status { vars, players }`: a parsed status reply, with `vars`
-//!     as in `parse_server_vars` and `players` a `Vec<Player>`.
-//!   - `Event::StatusInvalid`: a reply with the status header whose content
-//!     does not parse.
-//!   - `Event::StatusTimeout`: no status reply within the timeout.
 //!
 //! Time values in these tests are exact binary fractions (0.25, 0.5), so the
 //! round-trip times compare exactly.
 
 mod common;
 
-use common::{Event, HEADER, Harness, Mode, START_TIME, rcon_reply};
+use common::{Event, Harness, Mode, START_TIME, rcon_reply};
 use xrcon::core::PingKind;
 
 /// Default ping timeout of the Python client (`ping2(timeout=1)`).
 const PING_TIMEOUT: f64 = 1.0;
-/// Default status timeout of the Python client (`CHALLENGE_TIMEOUT = 3`).
-const STATUS_TIMEOUT: f64 = 3.0;
 
 const PING_Q2: &[u8] = b"\xff\xff\xff\xffping";
 const PONG_Q2: &[u8] = b"\xff\xff\xff\xffack";
 const PING_Q3: &[u8] = b"ping";
 const PONG_Q3: &[u8] = b"\xff\xff\xff\xffdisconnect";
-const GETSTATUS: &[u8] = b"\xff\xff\xff\xffgetstatus";
-
-/// A valid status reply: two server variables and one player.
-fn status_reply() -> Vec<u8> {
-    [
-        HEADER,
-        b"statusResponse\n\\gamename\\Xonotic\\mapname\\lostspace2\n4 5 \"Player\"\n",
-    ]
-    .concat()
-}
 
 /// A harness (non-secure mode; the mode does not matter for these tests).
 fn harness() -> Harness {
@@ -284,144 +265,4 @@ fn q3_timeout_at_deadline() {
     h.take_sent();
     h.advance(PING_TIMEOUT);
     assert_eq!(h.take_events(), vec![Event::PingTimeout(PingKind::Q3)]);
-}
-
-// ---------------------------------------------------------------------------
-// Status query: `header + "getstatus"`, answer `header + "statusResponse\n..."`
-// ---------------------------------------------------------------------------
-
-/// Starting a status query sends exactly one datagram: `header + getstatus`.
-#[test]
-fn status_sends_getstatus() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    assert_eq!(h.take_sent(), vec![GETSTATUS.to_vec()]);
-}
-
-/// The timer is set to the start time plus the timeout.
-#[test]
-fn status_sets_timer() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    assert_eq!(h.session.poll_timeout(), Some(START_TIME + STATUS_TIMEOUT));
-}
-
-/// A valid status reply gives a `Status` event with the parsed variables
-/// and players, and clears the timer.
-#[test]
-fn status_reply_is_parsed() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.recv(&status_reply());
-    let events = h.take_events();
-    assert_eq!(events.len(), 1);
-    let Event::Status { vars, players } = &events[0] else {
-        panic!("expected a Status event, got {:?}", events[0]);
-    };
-    assert_eq!(vars.len(), 2);
-    assert_eq!(vars[&b"gamename"[..]], b"Xonotic");
-    assert_eq!(vars[&b"mapname"[..]], b"lostspace2");
-    assert_eq!(players.len(), 1);
-    assert_eq!((players[0].frags, players[0].ping), (4, 5));
-    assert_eq!(players[0].name, b"Player");
-    assert_eq!(h.session.poll_timeout(), None);
-}
-
-/// A datagram that is not a status reply is ignored and the query keeps
-/// waiting.
-#[test]
-fn status_ignores_other_datagrams() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.recv(b"bad packet");
-    h.recv(b"\xff\xff\xff\xffack");
-    assert_eq!(h.take_events(), vec![]);
-    assert_eq!(h.session.poll_timeout(), Some(START_TIME + STATUS_TIMEOUT));
-}
-
-/// A status reply after ignored datagrams is still accepted.
-#[test]
-fn status_reply_after_ignored_datagram() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.recv(b"bad packet");
-    h.recv(&status_reply());
-    assert!(matches!(h.take_events().as_slice(), [Event::Status { .. }]));
-}
-
-/// A reply with the status header whose content does not parse gives
-/// `StatusInvalid`, and the query ends (no timer left).
-#[test]
-fn status_invalid_content_is_reported() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.recv(&[HEADER, b"statusResponse\nnot server vars\n".as_slice()].concat());
-    assert_eq!(h.take_events(), vec![Event::StatusInvalid]);
-    assert_eq!(h.session.poll_timeout(), None);
-}
-
-/// A valid reply is reported once; a second reply is ignored.
-#[test]
-fn status_second_reply_is_ignored() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.recv(&status_reply());
-    h.take_events();
-    h.recv(&status_reply());
-    assert_eq!(h.take_events(), vec![]);
-}
-
-/// Before the deadline a timeout call reports nothing.
-#[test]
-fn status_no_timeout_before_deadline() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.advance(2.75);
-    assert_eq!(h.take_events(), vec![]);
-}
-
-/// At the deadline the query ends with `StatusTimeout` and no timer is left.
-#[test]
-fn status_timeout_at_deadline() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.advance(STATUS_TIMEOUT);
-    assert_eq!(h.take_events(), vec![Event::StatusTimeout]);
-    assert_eq!(h.session.poll_timeout(), None);
-}
-
-/// A status reply after the timeout is ignored.
-#[test]
-fn status_late_reply_is_ignored() {
-    let mut h = harness();
-    h.getstatus(STATUS_TIMEOUT);
-    h.take_sent();
-    h.advance(STATUS_TIMEOUT);
-    h.take_events();
-    h.recv(&status_reply());
-    assert_eq!(h.take_events(), vec![]);
-}
-
-/// A status reply when no query was started is ignored.
-#[test]
-fn status_unsolicited_reply_is_ignored() {
-    let mut h = harness();
-    h.recv(&status_reply());
-    assert_eq!(h.take_events(), vec![]);
-}
-
-/// The timeout is the value passed to `getstatus`:
-/// with 0.5s the timer is 0.5s ahead.
-#[test]
-fn status_custom_timeout() {
-    let mut h = harness();
-    h.getstatus(0.5);
-    assert_eq!(h.session.poll_timeout(), Some(START_TIME + 0.5));
 }

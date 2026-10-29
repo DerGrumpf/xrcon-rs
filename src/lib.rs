@@ -13,4 +13,7 @@ pub mod net;
 pub mod packet;
 pub mod parse;
 
+#[cfg(feature = "tokio")]
+pub mod tokio;
+
 pub use error::{Error, Result};

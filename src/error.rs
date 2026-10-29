@@ -14,10 +14,6 @@ pub enum Error {
     ChallengeTooShort,
     /// The server-vars string is malformed.
     BadVars,
-    /// A player line is malformed.
-    BadPlayer,
-    /// The status packet is malformed (vars line missing or invalid).
-    BadStatus,
     /// A master-server entry is truncated or has a wrong separator byte.
     BadServerEntry,
     /// The master-server reply has no terminator.
@@ -46,8 +42,6 @@ impl fmt::Display for Error {
             Error::BadHeader => "packet header does not match the expected type",
             Error::ChallengeTooShort => "challenge reply is shorter than 11 bytes",
             Error::BadVars => "malformed server vars",
-            Error::BadPlayer => "malformed player line",
-            Error::BadStatus => "malformed status packet",
             Error::BadServerEntry => "malformed master server entry",
             Error::MissingTerminator => "master server reply has no terminator",
             Error::EmptyAddr => "empty address",

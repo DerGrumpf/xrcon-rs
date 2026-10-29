@@ -21,15 +21,6 @@ fn strip_header<'a>(packet: &'a [u8], tag: &[u8]) -> Result<&'a [u8]> {
         .ok_or(Error::BadHeader)
 }
 
-/// Splits `bytes` at the first `\n`. Returns the line (without the newline)
-/// and the bytes after it, or `None` if there is no newline.
-fn split_line(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
-    let i = bytes.iter().position(|&c| c == b'\n')?;
-    let (line, tail) = bytes.split_at(i);
-    let (_, tail) = tail.split_first()?;
-    Some((line, tail))
-}
-
 /// Parses a challenge reply (`H "challenge " <challenge> ...`).
 ///
 /// Returns the 11 bytes after `"challenge "`. Bytes after the 11th are
@@ -126,74 +117,6 @@ pub fn parse_server_vars(vars: &[u8]) -> Result<HashMap<Vec<u8>, Vec<u8>>> {
         .iter()
         .map(|[k, v]| (k.to_vec(), v.to_vec()))
         .collect())
-}
-
-/// One player line of a status reply.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Player {
-    /// Score of the player. May be negative.
-    pub frags: i32,
-    /// Ping of the player in milliseconds. May be negative.
-    pub ping: i32,
-    /// Player name as raw bytes (may contain spaces, quotes and any bytes).
-    pub name: Vec<u8>,
-}
-
-/// Parses a decimal `i32`: optional leading `-`, then digits only.
-fn parse_i32(bytes: &[u8]) -> Result<i32> {
-    let digits = bytes.strip_prefix(b"-").unwrap_or(bytes);
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return Err(Error::BadPlayer);
-    }
-    std::str::from_utf8(bytes)
-        .ok()
-        .and_then(|s| s.parse::<i32>().ok())
-        .ok_or(Error::BadPlayer)
-}
-
-impl Player {
-    /// Parses one player line: `<frags> <ping> "<name>"`.
-    ///
-    /// The line must not contain leading or trailing text and must not
-    /// include the line terminator. The name runs from the first quote to
-    /// the last quote of the line.
-    pub fn parse(line: &[u8]) -> Result<Player> {
-        let mut parts = line.splitn(3, |&b| b == b' ');
-        let (Some(frags), Some(ping), Some(quoted)) = (parts.next(), parts.next(), parts.next())
-        else {
-            return Err(Error::BadPlayer);
-        };
-        let name = quoted
-            .strip_prefix(b"\"")
-            .and_then(|q| q.strip_suffix(b"\""))
-            .ok_or(Error::BadPlayer)?;
-        Ok(Player {
-            frags: parse_i32(frags)?,
-            ping: parse_i32(ping)?,
-            name: name.to_vec(),
-        })
-    }
-}
-
-/// Parses a status reply into server vars and players.
-///
-/// Layout: `H "statusResponse\n"`, the vars line and `"\n"`, then one
-/// `<frags> <ping> "<name>"` line plus `"\n"` per player. Every player line
-/// must end with `\n`. If the vars line is missing or malformed, or any
-/// player line is malformed, the whole packet is an error. No players is
-/// valid.
-#[allow(clippy::type_complexity)]
-pub fn parse_status_packet(packet: &[u8]) -> Result<(HashMap<Vec<u8>, Vec<u8>>, Vec<Player>)> {
-    let body = strip_header(packet, b"statusResponse\n")?;
-    let (vars_line, mut rest) = split_line(body).ok_or(Error::BadStatus)?;
-    let vars = parse_server_vars(vars_line)?;
-    let mut players = Vec::new();
-    while !rest.is_empty() {
-        let (line, tail) = split_line(rest).ok_or(Error::BadPlayer)?;
-        players.push(Player::parse(line)?);
-        rest = tail;
-    }
-    Ok((vars, players))
 }
 
 /// Parses a master-server reply into `(address, port)` pairs.

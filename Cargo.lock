@@ -506,30 +506,22 @@ dependencies = [
 
 [[package]]
 name = "xrcon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "configparser",
  "hmac",
  "md4",
  "rpassword",
+ "tokio",
 ]
 
 [[package]]
 name = "xrcon-python"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
- "tokio",
- "xrcon",
- "xrcon-tokio",
-]
-
-[[package]]
-name = "xrcon-tokio"
-version = "0.1.0"
-dependencies = [
  "tokio",
  "xrcon",
 ]

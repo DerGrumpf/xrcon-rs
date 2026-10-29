@@ -6,19 +6,19 @@
 //! # Concurrent operations
 //!
 //! The session tracks one pending operation at a time (a challenge
-//! handshake, a ping or a status query). Starting a new one (`ping`,
-//! `getstatus`, or `send` in [`Mode::Challenge`]) silently replaces the
+//! handshake or a ping). Starting a new one (`ping` or `send` in
+//! [`Mode::Challenge`]) silently replaces the
 //! pending one: no event is emitted for the replaced operation, and its
 //! deadline is dropped. `send` in [`Mode::Nosecure`] or [`Mode::Time`] does
 //! not touch the pending operation. rcon replies are handled independently
 //! of the pending operation.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use crate::packet::{
     HEADER, rcon_nosecure_packet, rcon_secure_challenge_packet, rcon_secure_time_packet,
 };
-use crate::parse::{Player, parse_challenge_response, parse_rcon_response, parse_status_packet};
+use crate::parse::{parse_challenge_response, parse_rcon_response};
 
 /// How `send` authenticates rcon commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,17 +56,6 @@ pub enum Event {
     },
     /// A ping was not answered before its deadline.
     PingTimeout(PingKind),
-    /// A status reply arrived and parsed.
-    Status {
-        /// Server variables.
-        vars: HashMap<Vec<u8>, Vec<u8>>,
-        /// Players on the server.
-        players: Vec<Player>,
-    },
-    /// A status reply arrived but its content did not parse.
-    StatusInvalid,
-    /// A status query was not answered before its deadline.
-    StatusTimeout,
 }
 
 /// Pending challenge handshake. Settings are captured when `send` is called.
@@ -86,9 +75,6 @@ enum Op {
     Ping {
         kind: PingKind,
         start: f64,
-        deadline: f64,
-    },
-    Status {
         deadline: f64,
     },
 }
@@ -206,17 +192,6 @@ impl Session {
         };
     }
 
-    /// Starts a status query. Queues `H "getstatus"`; the deadline is
-    /// `now + timeout`.
-    ///
-    /// Replaces any pending operation.
-    pub fn getstatus(&mut self, timeout: f64, now: f64) {
-        self.transmits.push_back(with_header(b"getstatus"));
-        self.op = Op::Status {
-            deadline: now + timeout,
-        };
-    }
-
     /// Feeds one received datagram into the session.
     ///
     /// Valid rcon replies always produce [`Event::Response`]. Any other
@@ -258,17 +233,6 @@ impl Session {
                     };
                 }
             }
-            Op::Status { deadline } => {
-                if datagram.starts_with(&with_header(b"statusResponse\n")) {
-                    let event = match parse_status_packet(datagram) {
-                        Ok((vars, players)) => Event::Status { vars, players },
-                        Err(_) => Event::StatusInvalid,
-                    };
-                    self.events.push_back(event);
-                } else {
-                    self.op = Op::Status { deadline };
-                }
-            }
         }
     }
 
@@ -306,13 +270,6 @@ impl Session {
                     };
                 }
             }
-            Op::Status { deadline } => {
-                if now >= deadline {
-                    self.events.push_back(Event::StatusTimeout);
-                } else {
-                    self.op = Op::Status { deadline };
-                }
-            }
         }
     }
 
@@ -331,7 +288,7 @@ impl Session {
         match &self.op {
             Op::Idle => None,
             Op::Challenge(c) => Some(c.deadline),
-            Op::Ping { deadline, .. } | Op::Status { deadline } => Some(*deadline),
+            Op::Ping { deadline, .. } => Some(*deadline),
         }
     }
 }

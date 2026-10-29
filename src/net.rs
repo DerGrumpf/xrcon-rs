@@ -1,12 +1,11 @@
 //! Blocking rcon client on a std `UdpSocket`, driving [`Session`].
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::core::{Event, Mode, PingKind, Session};
-use crate::parse::Player;
 
 /// Errors of the blocking client.
 #[derive(Debug)]
@@ -15,8 +14,6 @@ pub enum Error {
     Io(io::Error),
     /// The server never answered the challenge request.
     ChallengeFailed,
-    /// The status reply could not be parsed.
-    StatusInvalid,
     /// The host did not resolve.
     NoAddress,
 }
@@ -26,7 +23,6 @@ impl std::fmt::Display for Error {
         match self {
             Error::Io(e) => write!(f, "{e}"),
             Error::ChallengeFailed => f.write_str("no challenge reply from server"),
-            Error::StatusInvalid => f.write_str("invalid status reply"),
             Error::NoAddress => f.write_str("host did not resolve"),
         }
     }
@@ -39,9 +35,6 @@ impl From<io::Error> for Error {
         Error::Io(e)
     }
 }
-
-/// Result of a status query.
-pub type Status = (HashMap<Vec<u8>, Vec<u8>>, Vec<Player>);
 
 fn now() -> f64 {
     SystemTime::now()
@@ -184,21 +177,6 @@ impl Client {
             match self.next_event()? {
                 Event::Pong { rtt, .. } => return Ok(Some(rtt)),
                 Event::PingTimeout(_) => return Ok(None),
-                _ => {}
-            }
-        }
-    }
-
-    /// Queries the server status. Returns `None` on timeout.
-    pub fn getstatus(&mut self, timeout: f64) -> Result<Option<Status>, Error> {
-        self.events.clear();
-        self.session.getstatus(timeout, now());
-        self.pump()?;
-        loop {
-            match self.next_event()? {
-                Event::Status { vars, players } => return Ok(Some((vars, players))),
-                Event::StatusTimeout => return Ok(None),
-                Event::StatusInvalid => return Err(Error::StatusInvalid),
                 _ => {}
             }
         }

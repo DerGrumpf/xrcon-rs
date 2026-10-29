@@ -10,5 +10,4 @@ from ._xrcon import (
     parse_server_addr,
     parse_server_vars,
     parse_servers_response,
-    parse_status_packet,
 )
