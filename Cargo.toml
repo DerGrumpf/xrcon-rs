@@ -5,6 +5,7 @@ rust-version = "1.97"
 version.workspace = true
 license = "GPL-3.0-or-later"
 description = "rcon client for Xonotic (DarkPlaces rcon protocol): CLI, Rust library and Python bindings"
+repository = "https://github.com/DerGrumpf/xrcon-rs"
 
 [features]
 tokio = ["dep:tokio"]
