@@ -29,7 +29,7 @@ strip = true
 members = ["python"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }

@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "xrcon"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "clap",
  "configparser",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "xrcon-python"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
