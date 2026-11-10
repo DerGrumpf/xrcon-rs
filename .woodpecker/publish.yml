@@ -1,0 +1,54 @@
+labels:
+  backend: docker
+
+when:
+  - event: [push, manual]
+    branch: main
+
+steps:
+  - name: publish-crate
+    image: rust:1
+    depends_on: []
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+      CARGO_REGISTRY_TOKEN:
+        from_secret: crates-io-secret
+    commands:
+      - apt-get update -qq >/dev/null && apt-get install -y -qq jq >/dev/null
+      - |
+        LOCAL=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+        PUBLISHED=$(curl -fsS -A "xrcon-woodpecker-ci" https://crates.io/api/v1/crates/xrcon | jq -r '.crate.max_version')
+        echo "local=$${LOCAL} published=$${PUBLISHED}"
+        [ -n "$${LOCAL}" ] && [ -n "$${PUBLISHED}" ] || { echo "version lookup failed"; exit 1; }
+        NEWEST=$(printf '%s\n%s\n' "$${LOCAL}" "$${PUBLISHED}" | sort -V | tail -n1)
+        if [ "$${LOCAL}" != "$${PUBLISHED}" ] && [ "$${NEWEST}" = "$${LOCAL}" ]; then
+          cargo publish -p xrcon
+        else
+          echo "crate: nothing to publish"
+        fi
+
+  - name: publish-pypi
+    image: rust:1
+    depends_on: []
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+      UV_PUBLISH_TOKEN:
+        from_secret: pypi-secret
+    commands:
+      - apt-get update -qq >/dev/null && apt-get install -y -qq jq python3-venv >/dev/null
+      - python3 -m venv /tmp/venv
+      - /tmp/venv/bin/pip install -q "maturin[zig]" uv
+      - |
+        export PATH="/tmp/venv/bin:$${PATH}"
+        LOCAL=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+        PUBLISHED=$(curl -fsS https://pypi.org/pypi/xrcon-rs/json | jq -r '.info.version')
+        echo "local=$${LOCAL} published=$${PUBLISHED}"
+        [ -n "$${LOCAL}" ] && [ -n "$${PUBLISHED}" ] || { echo "version lookup failed"; exit 1; }
+        NEWEST=$(printf '%s\n%s\n' "$${LOCAL}" "$${PUBLISHED}" | sort -V | tail -n1)
+        if [ "$${LOCAL}" != "$${PUBLISHED}" ] && [ "$${NEWEST}" = "$${LOCAL}" ]; then
+          cd python
+          maturin build --release --sdist --zig --compatibility manylinux2014 -o /tmp/dist
+          uv publish /tmp/dist/*
+        else
+          echo "pypi: nothing to publish"
+        fi
